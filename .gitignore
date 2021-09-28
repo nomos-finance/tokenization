@@ -1,0 +1,11 @@
+node_modules
+.env
+.openzeppelin
+
+#Hardhat files
+cache
+artifacts
+types
+
+#MACOS files
+.DS_Store
