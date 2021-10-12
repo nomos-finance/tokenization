@@ -16,6 +16,7 @@ import {IncentivizedERC20} from "./IncentivizedERC20.sol";
 import {
     IAaveIncentivesController
 } from "../../interfaces/IAaveIncentivesController.sol";
+import {Vault} from "../libraries/affix/Vault.sol";
 
 /**
  * @title Aave ERC20 AToken
@@ -29,6 +30,7 @@ contract AToken is
 {
     using WadRayMath for uint256;
     using SafeERC20 for IERC20;
+    using Vault for Vault.Storage;
 
     bytes public constant EIP712_REVISION = bytes("1");
     bytes32 internal constant EIP712_DOMAIN =
@@ -49,10 +51,10 @@ contract AToken is
 
     ILendingPool internal _pool;
     address internal _treasury;
-    address internal _underlyingAsset;
+    Vault.Storage internal _underlyingAsset;
     IAaveIncentivesController internal _incentivesController;
 
-    modifier onlyLendingPool {
+    modifier onlyLendingPool() {
         require(
             _msgSender() == address(_pool),
             Errors.CT_CALLER_MUST_BE_LENDING_POOL
@@ -107,7 +109,12 @@ contract AToken is
 
         _pool = pool;
         _treasury = treasury;
-        _underlyingAsset = underlyingAsset;
+        _underlyingAsset.underlyingAsset = underlyingAsset;
+        //_underlyingAsset.aaveV2.poolAddress = aaveV2Pool;
+        //_underlyingAsset.compound.cToken = cToken;
+        _underlyingAsset.depositReserveRatio = 20;
+        _underlyingAsset.alertPercent = 10;
+        _underlyingAsset.aaveActive = true;
         _incentivesController = incentivesController;
 
         emit Initialized(
@@ -140,7 +147,7 @@ contract AToken is
         require(amountScaled != 0, Errors.CT_INVALID_BURN_AMOUNT);
         _burn(user, amountScaled);
 
-        IERC20(_underlyingAsset).safeTransfer(receiverOfUnderlying, amount);
+        _underlyingAsset.safeTransfer(receiverOfUnderlying, amount);
 
         emit Transfer(user, address(0), amount);
         emit Burn(user, receiverOfUnderlying, amount, index);
@@ -230,7 +237,9 @@ contract AToken is
     {
         return
             super.balanceOf(user).rayMul(
-                _pool.getReserveNormalizedIncome(_underlyingAsset)
+                _pool.getReserveNormalizedIncome(
+                    _underlyingAsset.underlyingAsset
+                )
             );
     }
 
@@ -284,7 +293,9 @@ contract AToken is
 
         return
             currentSupplyScaled.rayMul(
-                _pool.getReserveNormalizedIncome(_underlyingAsset)
+                _pool.getReserveNormalizedIncome(
+                    _underlyingAsset.underlyingAsset
+                )
             );
     }
 
@@ -313,7 +324,7 @@ contract AToken is
      * @dev Returns the address of the underlying asset of this aToken (E.g. WETH for aWETH)
      **/
     function UNDERLYING_ASSET_ADDRESS() public view override returns (address) {
-        return _underlyingAsset;
+        return _underlyingAsset.underlyingAsset;
     }
 
     /**
@@ -360,7 +371,7 @@ contract AToken is
         onlyLendingPool
         returns (uint256)
     {
-        IERC20(_underlyingAsset).safeTransfer(target, amount);
+        _underlyingAsset.safeTransfer(target, amount);
         return amount;
     }
 
@@ -435,7 +446,7 @@ contract AToken is
         uint256 amount,
         bool validate
     ) internal {
-        address underlyingAsset = _underlyingAsset;
+        address underlyingAsset = _underlyingAsset.underlyingAsset;
         ILendingPool pool = _pool;
 
         uint256 index = pool.getReserveNormalizedIncome(underlyingAsset);

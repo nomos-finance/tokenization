@@ -2,10 +2,14 @@ node_modules
 .env
 .openzeppelin
 
+#VSCode Files
+.vscode
+soljson-v0.6.12+commit.27d51765.js
+
 #Hardhat files
 cache
 artifacts
-types
+/types
 
 #MACOS files
 .DS_Store

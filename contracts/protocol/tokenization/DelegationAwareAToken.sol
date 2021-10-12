@@ -12,7 +12,7 @@ import {AToken} from "./AToken.sol";
  * @author Aave
  */
 contract DelegationAwareAToken is AToken {
-    modifier onlyPoolAdmin {
+    modifier onlyPoolAdmin() {
         require(
             _msgSender() ==
                 ILendingPool(_pool).getAddressesProvider().getPoolAdmin(),
@@ -26,6 +26,6 @@ contract DelegationAwareAToken is AToken {
      * @param delegatee The address that will receive the delegation
      **/
     function delegateUnderlyingTo(address delegatee) external onlyPoolAdmin {
-        IDelegationToken(_underlyingAsset).delegate(delegatee);
+        IDelegationToken(_underlyingAsset.underlyingAsset).delegate(delegatee);
     }
 }
