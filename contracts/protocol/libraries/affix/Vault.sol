@@ -21,11 +21,13 @@ library Vault {
     // ============ Structs ============
 
     struct Storage {
+        address foundation;
         address underlyingAsset;
         AaveV2Integration.AaveV2 aaveV2;
         //CompoundInegration.Compound compound;
         uint256 depositReserveRatio;
         uint256 alertPercent;
+        uint256 debt;
         bool aaveActive;
     }
 
@@ -65,36 +67,66 @@ library Vault {
         return IERC20(vault.underlyingAsset).balanceOf(address(this));
     }
 
-    function totalSupply(Vault.Storage storage vault)
+    function totalLiquidity(Vault.Storage storage vault)
         internal
         view
         returns (uint256)
     {
+        return vault.liquidity().add(vault.debt);
+    }
+
+    function incomings(Vault.Storage storage vault)
+        internal
+        view
+        returns (uint256)
+    {
+        return vault.liquidity().sub(vault.debt);
+    }
+
+    function recoverIncoming(Vault.Storage storage vault) internal {
+        require(vault.foundation != address(0), "set foundtion address please");
         if (!vault.aaveActive) {
-            //add compound paltform balance
-            //return vault.liquidity().add(vault.compound.getBalance);
-        }
-        return vault.liquidity().add(vault.aaveV2.getBalance());
+            return;
+        } else
+            vault.aaveV2.withdraw(
+                vault.underlyingAsset,
+                vault.foundation,
+                vault.incomings()
+            );
+    }
+
+    function claimRewards(Vault.Storage storage vault) internal {
+        require(vault.foundation != address(0), "set foundtion address please");
+        if (!vault.aaveActive) {
+            return;
+        } else
+            vault.aaveV2.claim(
+                vault.underlyingAsset,
+                vault.foundation,
+                vault.incomings()
+            );
     }
 
     function withdraw(Vault.Storage storage vault, uint256 amount) internal {
+        require(amount <= vault.debt, "not enough balance");
         if (!vault.aaveActive) {
             return;
-        }
-        vault.aaveV2.withdraw(vault.underlyingAsset, address(this), amount);
+        } else
+            vault.aaveV2.withdraw(vault.underlyingAsset, address(this), amount);
+        vault.debt.sub(amount);
     }
 
     function deposit(Vault.Storage storage vault, uint256 amount) internal {
         if (!vault.aaveActive) {
             return;
-        }
-        vault.aaveV2.deposit(vault.underlyingAsset, amount);
+        } else vault.aaveV2.deposit(vault.underlyingAsset, amount);
+        vault.debt.add(amount);
     }
 
     function decreasePosition(Vault.Storage storage vault, uint256 amount)
         internal
     {
-        uint256 lastSupply = vault.totalSupply();
+        uint256 lastSupply = vault.totalLiquidity();
         require(amount <= lastSupply, "not enough balance");
         uint256 newSupply = lastSupply.sub(amount);
         uint256 lastLiquidity = vault.liquidity();
@@ -115,7 +147,7 @@ library Vault {
 
     function updatePosition(Vault.Storage storage vault) internal {
         uint256 newLiquidity =
-            vault.totalSupply().mul(vault.depositReserveRatio).div(100);
+            vault.totalLiquidity().mul(vault.depositReserveRatio).div(100);
         uint256 lastLiquidity = vault.liquidity();
         require(lastLiquidity != newLiquidity, "Redundant operation");
         if (lastLiquidity > newLiquidity) {

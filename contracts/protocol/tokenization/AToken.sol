@@ -478,4 +478,24 @@ contract AToken is
     ) internal override {
         _transfer(from, to, amount, true);
     }
+
+    /**
+     * @dev Overrides the parent availableLiquidity to get the balance of the
+     * underlying asset of this aToken
+     **/
+    function availableLiquidity() external view override returns (uint256) {
+        return _underlyingAsset.totalLiquidity();
+    }
+
+    function incomings() external view returns (uint256) {
+        return _underlyingAsset.incomings();
+    }
+
+    function getIncomings() external {
+        _underlyingAsset.recoverIncoming();
+    }
+
+    function claimReward() external {
+        _underlyingAsset.claimRewards();
+    }
 }
