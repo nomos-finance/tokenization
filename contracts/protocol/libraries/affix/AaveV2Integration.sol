@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: agpl-3.0
 pragma solidity 0.6.12;
-pragma experimental ABIEncoderV2;
-
-import {DataTypes} from "../types/DataTypes.sol";
 
 interface IAaveATokenV2 {
     /**
@@ -18,7 +15,7 @@ interface IAaveATokenV2 {
     function getIncentivesController()
         external
         view
-        returns (IAaveIncentivesController);
+        returns (IAaveIncentivesControllerV2);
 }
 
 interface IAaveLendingPoolV2 {
@@ -47,19 +44,9 @@ interface IAaveLendingPoolV2 {
         uint256 amount,
         address to
     ) external;
-
-    /**
-     * @dev Returns the state and configuration of the reserve
-     * @param asset The address of the underlying asset of the reserve
-     * @return The state of the reserve
-     **/
-    function getReserveData(address asset)
-        external
-        view
-        returns (DataTypes.ReserveData memory);
 }
 
-interface IAaveIncentivesController {
+interface IAaveIncentivesControllerV2 {
     /**
      * @dev Claims reward for an user, on all the assets of the lending pool, accumulating the pending rewards
      * @param amount Amount of rewards to claim
@@ -100,6 +87,7 @@ library AaveV2Integration {
 
     struct AaveV2 {
         address poolAddress;
+        address aToken;
         uint16 code;
     }
 
@@ -107,26 +95,22 @@ library AaveV2Integration {
 
     // ============ Functions ============
 
-    function getAtoken(AaveV2Integration.AaveV2 storage aaveV2, address asset)
+    function getAtoken(AaveV2Integration.AaveV2 storage aaveV2)
         internal
         view
         returns (IAaveATokenV2)
     {
-        DataTypes.ReserveData memory reserveData =
-            IAaveLendingPoolV2(aaveV2.poolAddress).getReserveData(asset);
-        require(
-            reserveData.aTokenAddress != address(0),
-            "Invalid atoken address"
-        );
-        return IAaveATokenV2(reserveData.aTokenAddress);
+        require(aaveV2.aToken != address(0), "Invalid AToken address");
+        return IAaveATokenV2(aaveV2.aToken);
     }
 
-    function getIncentivesController(
-        AaveV2Integration.AaveV2 storage aaveV2,
-        address asset
-    ) internal view returns (IAaveIncentivesController) {
-        IAaveIncentivesController controller =
-            aaveV2.getAtoken(asset).getIncentivesController();
+    function getIncentivesController(AaveV2Integration.AaveV2 storage aaveV2)
+        internal
+        view
+        returns (IAaveIncentivesControllerV2)
+    {
+        IAaveIncentivesControllerV2 controller =
+            aaveV2.getAtoken().getIncentivesController();
         require(
             address(controller) != address(0),
             "Invalid AaveIncentivesController address"
@@ -134,12 +118,12 @@ library AaveV2Integration {
         return controller;
     }
 
-    function getBalance(AaveV2Integration.AaveV2 storage aaveV2, address asset)
+    function getBalance(AaveV2Integration.AaveV2 storage aaveV2)
         internal
         view
         returns (uint256 balance)
     {
-        return aaveV2.getAtoken(asset).balanceOf(address(this));
+        return aaveV2.getAtoken().balanceOf(address(this));
     }
 
     function deposit(
@@ -173,10 +157,6 @@ library AaveV2Integration {
         address[] memory assets = new address[](1);
         assets[0] = asset;
         return
-            aaveV2.getIncentivesController(asset).claimRewards(
-                assets,
-                amount,
-                to
-            );
+            aaveV2.getIncentivesController().claimRewards(assets, amount, to);
     }
 }

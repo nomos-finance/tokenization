@@ -72,16 +72,16 @@ contract AToken is
      * @param treasury The address of the Aave treasury, receiving the fees on this aToken
      * @param underlyingAsset The address of the underlying asset of this aToken (E.g. WETH for aWETH)
      * @param incentivesController The smart contract managing potential incentives distribution
-     * @param aTokenDecimals The decimals of the aToken, same as the underlying asset's
+     * @param aTokenCfgMap The decimals of the aToken, same as the underlying asset's
      * @param aTokenName The name of the aToken
      * @param aTokenSymbol The symbol of the aToken
      */
     function initialize(
         ILendingPool pool,
         address treasury,
-        address underlyingAsset,
+        address[4] calldata underlyingAsset,
         IAaveIncentivesController incentivesController,
-        uint8 aTokenDecimals,
+        uint256 aTokenCfgMap,
         string calldata aTokenName,
         string calldata aTokenSymbol,
         bytes calldata params
@@ -105,24 +105,19 @@ contract AToken is
 
         _setName(aTokenName);
         _setSymbol(aTokenSymbol);
-        _setDecimals(aTokenDecimals);
+        _setDecimals(uint8(aTokenCfgMap));
 
         _pool = pool;
         _treasury = treasury;
-        _underlyingAsset.underlyingAsset = underlyingAsset;
-        //_underlyingAsset.aaveV2.poolAddress = aaveV2Pool;
-        //_underlyingAsset.compound.cToken = cToken;
-        _underlyingAsset.depositReserveRatio = 20;
-        _underlyingAsset.alertPercent = 10;
-        _underlyingAsset.aaveActive = true;
+        _underlyingAsset.setAaveV2(underlyingAsset, aTokenCfgMap);
         _incentivesController = incentivesController;
 
         emit Initialized(
-            underlyingAsset,
+            underlyingAsset[0],
             address(pool),
             treasury,
             address(incentivesController),
-            aTokenDecimals,
+            uint8(aTokenCfgMap),
             aTokenName,
             aTokenSymbol,
             params

@@ -2,7 +2,7 @@
 pragma solidity 0.6.12;
 
 import {AaveV2Integration} from "./AaveV2Integration.sol";
-import {CompoundInegration} from "./CompoundInegration.sol";
+//import {CompoundInegration} from "./CompoundInegration.sol";
 import {IERC20} from "../../../dependencies/openzeppelin/contracts/IERC20.sol";
 import {
     SafeMath
@@ -16,22 +16,46 @@ library Vault {
     using SafeERC20 for IERC20;
     using Vault for Vault.Storage;
     using AaveV2Integration for AaveV2Integration.AaveV2;
-    using CompoundInegration for CompoundInegration.Compound;
+    //using CompoundInegration for CompoundInegration.Compound;
 
     // ============ Structs ============
 
     struct Storage {
-        uint256 depositReserveRatio;
-        uint256 alertPercent;
         address underlyingAsset;
         AaveV2Integration.AaveV2 aaveV2;
-        CompoundInegration.Compound compound;
+        //CompoundInegration.Compound compound;
+        uint256 depositReserveRatio;
+        uint256 alertPercent;
         bool aaveActive;
     }
 
     // ============ Events ============
 
+    event StrategyAddress(
+        address indexed underlying,
+        address aaveV2Platform,
+        address compoundPlatform
+    );
+
     // ============ Functions ============
+
+    function setAaveV2(
+        Vault.Storage storage vault,
+        address[4] calldata addresses,
+        uint256 cfgMap
+    ) internal {
+        uint256 CFG_MASK = 0xFF;
+        vault.underlyingAsset = addresses[0];
+        vault.aaveV2.poolAddress = addresses[1];
+        vault.aaveV2.aToken = addresses[2];
+        //vault.compound.cToken = addresses[3];
+        vault.depositReserveRatio = (cfgMap >> 8) & CFG_MASK;
+        vault.alertPercent = (cfgMap >> 16) & CFG_MASK;
+        if ((cfgMap >> 24) & CFG_MASK > 0) vault.aaveActive = true;
+        else vault.aaveActive = false;
+
+        emit StrategyAddress(addresses[0], addresses[1], addresses[3]);
+    }
 
     function liquidity(Vault.Storage storage vault)
         internal
@@ -50,10 +74,7 @@ library Vault {
             //add compound paltform balance
             //return vault.liquidity().add(vault.compound.getBalance);
         }
-        return
-            vault.liquidity().add(
-                vault.aaveV2.getBalance(vault.underlyingAsset)
-            );
+        return vault.liquidity().add(vault.aaveV2.getBalance());
     }
 
     function withdraw(Vault.Storage storage vault, uint256 amount) internal {
