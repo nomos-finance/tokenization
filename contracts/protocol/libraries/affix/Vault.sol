@@ -2,7 +2,7 @@
 pragma solidity 0.6.12;
 
 import {AaveV2Integration} from "./AaveV2Integration.sol";
-//import {CompoundInegration} from "./CompoundInegration.sol";
+import {CompoundInegration} from "./CompoundInegration.sol";
 import {IERC20} from "../../../dependencies/openzeppelin/contracts/IERC20.sol";
 import {
     SafeMath
@@ -16,7 +16,10 @@ library Vault {
     using SafeERC20 for IERC20;
     using Vault for Vault.Storage;
     using AaveV2Integration for AaveV2Integration.AaveV2;
-    //using CompoundInegration for CompoundInegration.Compound;
+    using CompoundInegration for CompoundInegration.Compound;
+
+    // ============ Enums ============
+    enum Strategy {Local, Aave, Compound}
 
     // ============ Structs ============
 
@@ -24,39 +27,62 @@ library Vault {
         address foundation;
         address underlyingAsset;
         AaveV2Integration.AaveV2 aaveV2;
-        //CompoundInegration.Compound compound;
-        uint256 depositReserveRatio;
-        uint256 alertPercent;
+        CompoundInegration.Compound compound;
         uint256 debt;
-        bool aaveActive;
+        Strategy strategy;
+        uint8 liquidityPercent;
+        uint8 adjustPercent;
+        bool initialize;
     }
 
     // ============ Events ============
 
-    event StrategyAddress(
-        address indexed underlying,
-        address aaveV2Platform,
-        address compoundPlatform
-    );
+    event StrategyAddress(address aaveV2, address atokenV2, address compound);
+
+    event LiquidityPercent(uint8 liquidityPercent, uint8 adjustPercent);
+
+    event NewFundation(address account);
+
+    event NewStrategy(Strategy strategy);
+
+    event Claim(Strategy strategy, uint256 amount);
+
+    event Recover(Strategy strategy, uint256 amount);
 
     // ============ Functions ============
 
-    function setAaveV2(
+    function setStrategyAddress(
         Vault.Storage storage vault,
-        address[4] calldata addresses,
-        uint256 cfgMap
+        address v2Aave,
+        address v2AToken,
+        address cToken
     ) internal {
-        uint256 CFG_MASK = 0xFF;
-        vault.underlyingAsset = addresses[0];
-        vault.aaveV2.poolAddress = addresses[1];
-        vault.aaveV2.aToken = addresses[2];
-        //vault.compound.cToken = addresses[3];
-        vault.depositReserveRatio = (cfgMap >> 8) & CFG_MASK;
-        vault.alertPercent = (cfgMap >> 16) & CFG_MASK;
-        if ((cfgMap >> 24) & CFG_MASK > 0) vault.aaveActive = true;
-        else vault.aaveActive = false;
+        require(vault.initialize == false, "only once");
+        vault.aaveV2.poolAddress = v2Aave;
+        vault.aaveV2.aToken = v2AToken;
+        vault.compound.cToken = cToken;
+        vault.initialize = true;
+        emit StrategyAddress(v2Aave, v2AToken, cToken);
+    }
 
-        emit StrategyAddress(addresses[0], addresses[1], addresses[3]);
+    function setLiquidityPercent(
+        Vault.Storage storage vault,
+        uint8 liquidity,
+        uint8 adjust
+    ) internal {
+        require(adjust < liquidity, "invalid parameter");
+        require(liquidity < 100, "invalid parameter");
+        vault.liquidityPercent = liquidity;
+        vault.adjustPercent = adjust;
+        emit LiquidityPercent(liquidity, adjust);
+    }
+
+    function setFundation(Vault.Storage storage vault, address account)
+        internal
+    {
+        require(account != address(0), "account can't be zero");
+        vault.foundation = account;
+        emit NewFundation(account);
     }
 
     function liquidity(Vault.Storage storage vault)
@@ -80,46 +106,58 @@ library Vault {
         view
         returns (uint256)
     {
-        return vault.liquidity().sub(vault.debt);
+        if (vault.strategy == Strategy.Local) return 0;
+        if (vault.strategy == Strategy.Compound)
+            return vault.compound.getBalance().sub(vault.debt);
+        else return vault.aaveV2.getBalance().sub(vault.debt);
     }
 
     function recoverIncoming(Vault.Storage storage vault) internal {
+        if (vault.strategy == Strategy.Local) return;
         require(vault.foundation != address(0), "set foundtion address please");
-        if (!vault.aaveActive) {
-            return;
+        uint256 amount = vault.incomings();
+        if (vault.strategy == Strategy.Compound) {
+            require(0 == vault.compound.withdraw(amount));
         } else
             vault.aaveV2.withdraw(
                 vault.underlyingAsset,
                 vault.foundation,
-                vault.incomings()
+                amount
             );
+        emit Recover(vault.strategy, amount);
     }
 
     function claimRewards(Vault.Storage storage vault) internal {
         require(vault.foundation != address(0), "set foundtion address please");
-        if (!vault.aaveActive) {
-            return;
+        if (vault.strategy == Strategy.Local) return;
+        uint256 rewards = 0;
+        if (vault.strategy == Strategy.Compound) {
+            rewards = vault.compound.getReward();
+            vault.compound.claim();
         } else
-            vault.aaveV2.claim(
+            rewards = vault.aaveV2.claim(
                 vault.underlyingAsset,
-                vault.foundation,
-                vault.incomings()
+                vault.foundation
             );
+
+        emit Claim(vault.strategy, rewards);
     }
 
     function withdraw(Vault.Storage storage vault, uint256 amount) internal {
         require(amount <= vault.debt, "not enough balance");
-        if (!vault.aaveActive) {
-            return;
-        } else
+        if (vault.strategy == Strategy.Local) return;
+        else if (vault.strategy == Strategy.Compound)
+            require(0 == vault.compound.withdraw(amount));
+        else
             vault.aaveV2.withdraw(vault.underlyingAsset, address(this), amount);
         vault.debt.sub(amount);
     }
 
     function deposit(Vault.Storage storage vault, uint256 amount) internal {
-        if (!vault.aaveActive) {
-            return;
-        } else vault.aaveV2.deposit(vault.underlyingAsset, amount);
+        if (vault.strategy == Strategy.Local) return;
+        else if (vault.strategy == Strategy.Compound)
+            require(0 == vault.compound.deposit(amount));
+        else vault.aaveV2.deposit(vault.underlyingAsset, amount);
         vault.debt.add(amount);
     }
 
@@ -134,20 +172,20 @@ library Vault {
         if (
             amount < lastLiquidity &&
             lastLiquidity.sub(amount) >
-            newSupply.mul(vault.alertPercent).div(100)
+            newSupply.mul(vault.adjustPercent).div(100)
         ) {
             return;
         }
         vault.withdraw(
-            newSupply.mul(vault.depositReserveRatio).div(100).add(amount).sub(
+            newSupply.mul(vault.liquidityPercent).div(100).add(amount).sub(
                 lastLiquidity
             )
         );
     }
 
-    function updatePosition(Vault.Storage storage vault) internal {
+    function adjustPosition(Vault.Storage storage vault) internal {
         uint256 newLiquidity =
-            vault.totalLiquidity().mul(vault.depositReserveRatio).div(100);
+            vault.totalLiquidity().mul(vault.liquidityPercent).div(100);
         uint256 lastLiquidity = vault.liquidity();
         require(lastLiquidity != newLiquidity, "Redundant operation");
         if (lastLiquidity > newLiquidity) {
@@ -157,12 +195,55 @@ library Vault {
         }
     }
 
+    function adjustStrategy(Vault.Storage storage vault, Strategy strategy)
+        internal
+    {
+        Strategy lastStrategy = vault.strategy;
+        require(strategy != lastStrategy, "same strategy");
+        if (lastStrategy == Strategy.Local) {
+            vault.strategy = strategy;
+            vault.adjustPosition();
+            emit NewStrategy(strategy);
+            return;
+        }
+
+        require(vault.foundation != address(0), "set foundtion address please");
+        address underlying = vault.underlyingAsset;
+        uint256 incoming = 0;
+        vault.claimRewards();
+        if (lastStrategy == Strategy.Aave) {
+            incoming = vault.aaveV2.getBalance().sub(vault.debt);
+            vault.aaveV2.withdraw(underlying, address(this), uint256(-1));
+        } else {
+            uint256 amount = vault.compound.getBalance();
+            incoming = amount.sub(vault.debt);
+            require(0 == vault.compound.withdraw(amount));
+        }
+
+        if (strategy == Strategy.Aave)
+            vault.aaveV2.deposit(
+                vault.underlyingAsset,
+                vault.debt.add(incoming)
+            );
+        else if (strategy == Strategy.Compound)
+            require(0 == vault.compound.deposit(vault.debt.add(incoming)));
+        else if (strategy == Strategy.Local) {
+            vault.debt = 0;
+            IERC20(vault.underlyingAsset).safeTransfer(
+                vault.foundation,
+                incoming
+            );
+        }
+        vault.strategy = strategy;
+        emit NewStrategy(strategy);
+    }
+
     function safeTransfer(
         Vault.Storage storage vault,
         address to,
         uint256 amount
     ) internal {
-        vault.decreasePosition(amount);
+        if (vault.strategy != Strategy.Local) vault.decreasePosition(amount);
         IERC20(vault.underlyingAsset).safeTransfer(to, amount);
     }
 }

@@ -151,12 +151,17 @@ library AaveV2Integration {
     function claim(
         AaveV2Integration.AaveV2 storage aaveV2,
         address asset,
-        address to,
-        uint256 amount
+        address to
     ) internal returns (uint256) {
         address[] memory assets = new address[](1);
         assets[0] = asset;
+        IAaveIncentivesControllerV2 controller =
+            aaveV2.getIncentivesController();
         return
-            aaveV2.getIncentivesController().claimRewards(assets, amount, to);
+            controller.claimRewards(
+                assets,
+                controller.getRewardsBalance(assets, address(0)),
+                to
+            );
     }
 }

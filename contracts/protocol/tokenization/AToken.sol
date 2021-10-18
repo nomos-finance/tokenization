@@ -72,16 +72,16 @@ contract AToken is
      * @param treasury The address of the Aave treasury, receiving the fees on this aToken
      * @param underlyingAsset The address of the underlying asset of this aToken (E.g. WETH for aWETH)
      * @param incentivesController The smart contract managing potential incentives distribution
-     * @param aTokenCfgMap The decimals of the aToken, same as the underlying asset's
+     * @param aTokenDecimals The decimals of the aToken, same as the underlying asset's
      * @param aTokenName The name of the aToken
      * @param aTokenSymbol The symbol of the aToken
      */
     function initialize(
         ILendingPool pool,
         address treasury,
-        address[4] calldata underlyingAsset,
+        address underlyingAsset,
         IAaveIncentivesController incentivesController,
-        uint256 aTokenCfgMap,
+        uint8 aTokenDecimals,
         string calldata aTokenName,
         string calldata aTokenSymbol,
         bytes calldata params
@@ -105,19 +105,20 @@ contract AToken is
 
         _setName(aTokenName);
         _setSymbol(aTokenSymbol);
-        _setDecimals(uint8(aTokenCfgMap));
+        _setDecimals(aTokenDecimals);
 
         _pool = pool;
         _treasury = treasury;
-        _underlyingAsset.setAaveV2(underlyingAsset, aTokenCfgMap);
+        _underlyingAsset.underlyingAsset = underlyingAsset;
+        _underlyingAsset.strategy = Vault.Strategy.Local;
         _incentivesController = incentivesController;
 
         emit Initialized(
-            underlyingAsset[0],
+            underlyingAsset,
             address(pool),
             treasury,
             address(incentivesController),
-            uint8(aTokenCfgMap),
+            aTokenDecimals,
             aTokenName,
             aTokenSymbol,
             params
@@ -497,5 +498,29 @@ contract AToken is
 
     function claimReward() external {
         _underlyingAsset.claimRewards();
+    }
+
+    function setStrategyAddress(
+        address v2Aave,
+        address v2AToken,
+        address cToken
+    ) external {
+        _underlyingAsset.setStrategyAddress(v2Aave, v2AToken, cToken);
+    }
+
+    function setLiquidityPercent(uint8 liquidity, uint8 adjust) external {
+        _underlyingAsset.setLiquidityPercent(liquidity, adjust);
+    }
+
+    function setFundation(address account) external {
+        _underlyingAsset.setFundation(account);
+    }
+
+    function adjustPosition() external {
+        _underlyingAsset.adjustPosition();
+    }
+
+    function adjustStrategy(Vault.Strategy strategy) external {
+        _underlyingAsset.adjustStrategy(strategy);
     }
 }
